@@ -35,7 +35,7 @@ const serviceData = [
     const password = await generateHashedPassword();
     const userData = [{ 
         firstName: 'admin', lastName: 'admin', email: 'admin@gmail.com', password: password, phone: '+251919765445', 
-        role: 'Admin', createdAt: new Date(), updatedAt: new Date(), }
+        isConfirmed: true, role: 'Admin', createdAt: new Date(), updatedAt: new Date(), }
     ];
     await Users.bulkCreate(userData);
 
@@ -50,20 +50,24 @@ const serviceData = [
     }
     const bookingData = [
       {
-        userId: existingUser.id,
         serviceId: existingService.id,
+        firstName: 'Jon',
+        lastName: 'Doe',
+        phoneNumber: '+251987654321',
         bookingDatetime: new Date('2025-04-01T10:00:00Z'),
-        status: 'confirmed',
+        status: 'Pending',
         notes: 'Client requested a deep tissue massage.',
-        payment_status: 'paid',
+        payment_status: 'unpaid',
         createdAt: new Date(),
         updatedAt: new Date(),
       },
       {
-        userId: existingUser.id,
         serviceId: existingService.id,
+        firstName: 'Phoenix',
+        lastName: 'Opia',
+        phoneNumber: '+251987654321',
         bookingDatetime: new Date('2025-04-02T14:30:00Z'),
-        status: 'pending',
+        status: 'Confirmed',
         notes: 'First-time customer. Prefers a relaxing session.',
         payment_status: 'unpaid',
         createdAt: new Date(),

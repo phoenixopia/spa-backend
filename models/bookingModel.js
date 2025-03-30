@@ -7,23 +7,33 @@ module.exports = (sequelize, DataTypes) => {
                 allowNull: false,
                 primaryKey: true,
             },
-            userId: {
-                type: DataTypes.UUID,
-                defaultValue: DataTypes.UUIDV4,
+            firstName: {
+                type: DataTypes.STRING,
+                allowNull: false
+            },
+            lastName: {
+                type: DataTypes.STRING,
+                allowNull: false
+            },
+            phoneNumber: {
+                type: DataTypes.STRING,
+                // unique: true,
                 allowNull: false,
-                references: {
-                    model: 'Users',
-                    key: 'id'
+                validate: {
+                  is: /^\+?[1-9]\d{1,14}$/ // E.164 format validation
                 }
             },
-            serviceId: {
-                type: DataTypes.UUID,
-                defaultValue: DataTypes.UUIDV4,
-                allowNull: false,
-                references: {
-                    model: 'Services',
-                    key: 'id'
-                }
+            email: {
+                type: DataTypes.STRING,
+                allowNull: true,
+                validate: {
+                    isEmail: true,
+                },
+                set(value) {
+                    if (value) {
+                    this.setDataValue('email', value.toLowerCase());
+                    }
+                },
             },
             bookingDatetime: {
                 type: DataTypes.DATE,
@@ -50,14 +60,23 @@ module.exports = (sequelize, DataTypes) => {
                 type: DataTypes.STRING,
                 allowNull: false,
                 defaultValue: 'Cash',
-            }
+            },
+            serviceId: {
+                type: DataTypes.UUID,
+                defaultValue: DataTypes.UUIDV4,
+                allowNull: false,
+                references: {
+                    model: 'Services',
+                    key: 'id'
+                }
+            },
         },
         {
             timestamps: true,
         }
     );
     Booking.associate = (models) => {
-        Booking.belongsTo(models.Users, { foreignKey: 'userId', as: 'user' });
+        // Booking.belongsTo(models.Users, { foreignKey: 'userId', as: 'user' });
         Booking.belongsTo(models.Services, { foreignKey: 'serviceId', as: 'service' });
         Booking.hasMany(models.Notifications, { foreignKey: 'bookingId', as: 'notification' });
     };

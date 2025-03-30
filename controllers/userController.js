@@ -47,11 +47,6 @@ exports.show = async (req, res) => {
         const user = await Users.findByPk(id, {
           include: [
             { model: Notifications, as: 'notification'},
-            {
-              model: Bookings,
-              as: 'booking',
-              include: [{ model: Services, as: 'service',}],
-            },
           ],
         });
         return res.status(200).json({success: true, data: user});
@@ -71,13 +66,9 @@ exports.getAll = async (req, res, next) => {
     const userCount = await Users.count();
     const totalPages = Math.ceil(userCount / pageSize);
     const users = await Users.findAll({
+      // where: {role: 'Admin'},
       include: [
         { model: Notifications, as: 'notification'},
-        {
-          model: Bookings,
-          as: 'booking',
-          include: [{ model: Services, as: 'service',}],
-        },
       ],
       offset: (pageNumber - 1) * pageSize,
       limit: pageSize,
@@ -98,12 +89,12 @@ exports.getAll = async (req, res, next) => {
 // User profile update
 exports.update = async (req, res, next) => {
   const { ...updates } = req.body;
+  const id = req.params.id || req.user.id;
+  if (!id) {
+      return res.status(400).json({ message: 'Please provide a user Id.' });
+  }
   const t = await sequelize.transaction();
   try {
-    const id = req.params.id || req.user.id;
-    if (!id) {
-        return res.status(400).json({ message: 'Please provide a user Id.' });
-    }
     const user = await Users.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE});
     if (!user) {
       await t.rollback();

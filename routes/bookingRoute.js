@@ -1,13 +1,14 @@
 const express = require('express');
 const { isAuthenticated, isAdmin } = require('../middleware/auth');
-const { createBooking, getAllBookings, getBookingById, updateBooking, deleteBooking } = require('../controllers/bookingController');
-// const { createServices, getAllServicess, getServicesById, updateServices, deleteServices } = require('../controllers/serviceController');
+const { createBooking, getAllBookings, getBookingById, updateBooking, deleteBooking, getBookingsByPhone } = require('../controllers/bookingController');
 const router = express.Router();
 
-router.get('/create', createBooking)
+
 router.get('/', getAllBookings);
 router.get('/:id?', getBookingById);
+router.get('/search/phone', getBookingsByPhone);
+router.post('/create', createBooking)
 router.put('/edit/:id?', updateBooking);
-router.delete('/delete/:id?', deleteBooking)
+router.delete('/delete/:id?',isAuthenticated, deleteBooking)
 
 module.exports = router;

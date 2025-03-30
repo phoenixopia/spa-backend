@@ -42,12 +42,6 @@ module.exports = (sequelize, DataTypes) => {
                 type: DataTypes.STRING,
                 allowNull: false,
                 defaultValue: 'Confirmation', 
-                // validate: {
-                //     isIn: {
-                //         args: [["Reminder", "Confirmation", "Cancellation",]],
-                //         msg: 'Billing cycle must be either "Reminder", "Confirmation" or "Cancellation".',
-                //     },
-                // },
             },
             status: {
                 type: DataTypes.STRING,

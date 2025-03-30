@@ -4,14 +4,14 @@ const { sequelize, Services, Bookings } = require('../models/index');
 // Create a new spa service
 exports.createServices = async (req, res) => {
     try {
-        const { name, description, category, price, discount, duration, status } = req.body;
+        const { name } = req.body;
         // Check if service with the same name already exists
         const existingService = await Services.findOne({ where: { name } });
         if (existingService) {
             return res.status(400).json({ success: false, message: 'A service with this name already exists.' });
         }
-        const Services = await Services.create({ name, description, category, price, discount, duration, status });
-        return res.status(201).json({ success: true, message: 'Spa service created successfully.', data: Services });
+        const service = await Services.create(req.body);
+        return res.status(201).json({ success: true, message: 'Spa service created successfully.', data: service });
     } catch (error) {
         return res.status(500).json({ success: false, message: 'An error occurred while creating the service.', error: error.message });
     }
@@ -38,6 +38,9 @@ exports.getAllServicess = async (req, res) => {
 exports.getServicesById = async (req, res) => {
     try {
         const { id } = req.params;
+        if (!id) {
+            return res.status(400).json({ success: false, message: "Please use an id" });
+        }
         const service = await Services.findByPk(id, {
             include: [
                 {
@@ -58,13 +61,13 @@ exports.getServicesById = async (req, res) => {
 // Update a spa service
 exports.updateServices = async (req, res) => {
     const { ...updates } = req.body;
+    const id = req.params.id;
+    if (!id) {
+        return res.status(400).json({ message: 'Please provide a user Id.' });
+    }
     const t = await sequelize.transaction();
     try {
-      const id = req.params.id || req.user.id;
-      if (!id) {
-          return res.status(400).json({ message: 'Please provide a user Id.' });
-      }
-      const service = await Services.findOne({ where: { id }, transaction: t, lock: t.LOCK.UPDATE});
+      const service = await Services.findByPk(id , { transaction: t, lock: t.LOCK.UPDATE });
       if (!service) {
         await t.rollback();
         return res.status(404).json({ success: false, message: 'Service not found.' });
@@ -86,6 +89,9 @@ exports.updateServices = async (req, res) => {
 // Delete a spa service
 exports.deleteServices = async (req, res) => {
     const { id } = req.params;
+    if (!id) {
+        return res.status(400).json({ message: 'Please provide a service Id.' });
+    }
     const t = await sequelize.transaction();
     try {
         // Lock the row to prevent simultaneous deletions

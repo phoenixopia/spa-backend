@@ -3,6 +3,7 @@ const moment = require('moment');
 const { sendPasswordResetEmail, sendConfirmationEmail } = require('../utilis/sendEmail');
 const { generateCode } = require('../utilis/generateCode');
 const { sequelize, Users } = require('../models/index');
+const { io, userSockets } = require('../socket');
 
 
 // capitalize names
@@ -36,7 +37,7 @@ exports.signup = async (req, res, next) => {
       const confirmationLink = `${process.env.CLIENT_URL}/confirm/${newUser.confirmationCode}`;
       await sendConfirmationEmail(newUser.email, newUser.firstName, newUser.lastName, confirmationLink);
       await t.commit();
-      return res.status(201).json({ success: true, message: 'User created successfully.', user: newUser });
+      return res.status(201).json({ success: true, message: 'Please check your email for confirmation code to verify your email.', user: newUser });
   } catch (error) {
       await t.rollback();
       console.error('Error during signup:', error);
@@ -65,6 +66,13 @@ exports.confirm = async (req, res) => {
     existingUser.isConfirmed = true;
     await existingUser.save({transaction: t});
     sendTokenResponse(existingUser, 200, res);
+
+    // After successful login, emit the socket event for admins
+    if (existingUser.role === 'Admin') {
+      console.log('\nrole: ', existingUser.role, '\n')
+      io.emit('userLoggedIn', { id: existingUser.id, role: existingUser.role });
+      console.log(`User admin '${existingUser.id}' connected to socket with id: ${userSockets.id}`);
+    }
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, message: error.message, stack: error.stack });
@@ -90,6 +98,11 @@ exports.signin = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid credential." });
     }
     sendTokenResponse(existingUser, 200, res);
+    // After successful login, emit the socket event for admins
+    if (existingUser.role === 'Admin') {
+      io.emit('userLoggedIn', { id: existingUser.id, role: existingUser.role });
+      console.log(`User admin '${existingUser.id}' connected to socket.`);
+    }
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, message: error.message, stack: error.stack });
