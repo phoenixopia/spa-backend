@@ -114,6 +114,8 @@ module.exports = (sequelize, DataTypes) => {
         // console.log('Associating model with:', Object.keys(models)); // Debug
         // User.hasMany(models.Bookings, { foreignKey: 'userId', as: 'booking' });
         User.hasMany(models.Notifications, { foreignKey: 'userId', as: 'notification' });
+        User.hasMany(models.Blogs, { foreignKey: 'userId', as: 'blog' });
+        User.hasMany(models.Testimonials, { foreignKey: 'userId', as: 'testimonal' });
     };
 
     return User;

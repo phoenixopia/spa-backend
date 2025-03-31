@@ -5,8 +5,8 @@ const router = express.Router();
 
 router.post('/create', createServices)
 router.get('/', getAllServicess);
-router.get('/:id?', getServicesById);
-router.put('/edit/:id?', updateServices);
-router.delete('/delete/:id?', deleteServices)
+router.get('/:id', getServicesById);
+router.put('/edit/:id', updateServices);
+router.delete('/delete/:id', deleteServices)
 
 module.exports = router;
