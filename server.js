@@ -35,7 +35,7 @@ app.use(cookieParser());
 app.use(cors());
 
 app.get("/", (req, res) => {
-    res.send("Welcome to `Consultancy Website`!");
+    res.send("Welcome to `Spa Content Management Website`!");
 });
 app.get("/api/connected-users", (req, res) => {
     res.json({ connectedUsers: Array.from(getConnectedUsers().entries()) });
