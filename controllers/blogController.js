@@ -1,6 +1,5 @@
 const { sequelize, Blogs } = require("../models"); // Sequelize instance
 
-
 // Get all blogs with pagination
 exports.getAllBlogs = async (req, res) => {
     try {
