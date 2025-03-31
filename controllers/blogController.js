@@ -127,7 +127,6 @@ exports.updateBlog = async (req, res) => {
         return res.status(500).json({ success: false, message: 'Failed to update a blog.', error: err.message });
     }
 };
-      
 
 // Delete a blog post with transaction support
 exports.deleteBlog = async (req, res) => {
