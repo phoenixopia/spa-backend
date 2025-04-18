@@ -6,123 +6,138 @@ const isDecimal = (value) => {
     return !isNaN(value) && /^\d+(\.\d{1,2})?$/.test(value);
 };
 
+
 // Create a new spa service
 exports.createService = async (req, res) => {
+    const { name, categoryId, price, duration, discount, image } = req.body;
+    const userId = req.user?.id || req.body.id;
+  
+    let imageBuffer = null;
+  
+    // 1. Handle uploaded file (e.g., from multipart/form-data)
+    if (req.file && req.file.buffer) {
+      imageBuffer = req.file.buffer;
+  
+    // 2. Handle base64 image string (e.g., from JSON body)
+    } else if (image && image.startsWith('data:image')) {
+      try {
+        const base64Data = image.split(';base64,').pop();
+        imageBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid base64 image format." });
+      }
+  
+    // 3. Handle stringified Buffer like "<Buffer ...>"
+    } else if (image && image.startsWith('<Buffer')) {
+      try {
+        const hex = image
+          .replace('<Buffer ', '')
+          .replace('>', '')
+          .trim()
+          .split(' ')
+          .map((byte) => parseInt(byte, 16));
+        imageBuffer = Buffer.from(hex);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid buffer image format." });
+      }
+    }
+
+    const errors = [];
+
+    if (!name?.trim()) errors.push("Name is required.");
+    if (!categoryId) errors.push("Category ID is required.");
+    if (!price) errors.push("Price is required.");
+    if (!userId) errors.push("User ID is required.");
+
+    if (name?.trim().length < 3) errors.push("Name must be at least 3 characters long.");
+
+    if (price && !isDecimal(price)) errors.push("Price must be a valid decimal number.");
+    if (discount && !isDecimal(discount)) errors.push("Discount must be a valid decimal number.");
+
+    if (duration != null && (isNaN(duration) || Number(duration) < 1)) {
+    errors.push("Duration must be a positive number.");
+    }
+
+    if (errors.length > 0) {
+    return res.status(400).json({
+        success: false,
+        message: "Validation failed.",
+        errors,
+    });
+    }
+  
+    const transaction = await sequelize.transaction();
+  
     try {
-        const { name, categoryId, price, duration, discount } = req.body;
-        const file = req.file;
-        const userId = req.user?.id || req.body.id;
-
-        if (!name || !categoryId || !price || !file || !userId) {
-            return res.status(400).json({ success: false, message: 'Missing the required fields.' });
-        }
-
-        if (name.length < 3) {
-            return res.status(400).json({ error: "Name must be at least 3 characters." });
-        }
-
-        if (!isDecimal(price)) {
-            return res.status(400).json({ error: "Price must be a valid decimal number." });
-        }
-
-        if (discount && !isDecimal(discount)) {
-            return res.status(400).json({ error: "Discount must be a valid decimal number." });
-        }
-
-        if (duration && (isNaN(duration) || duration < 1)) {
-            return res.status(400).json({ error: "Duration must be a positive number." });
-        }
-
-        const existingService = await Services.findOne({ where: { name, categoryId, price } });
-        if (existingService) {
-            return res.status(400).json({ success: false, message: `A service with name '${name}' already exists.` });
-        }
-
-        // Upload to Cloudinary using buffer
+      // Prevent duplicate service
+      const existingService = await Services.findOne({
+        where: { name, categoryId, price },
+        transaction
+      });
+  
+      if (existingService) {
+        await transaction.rollback();
+        return res.status(409).json({ success: false, message: `A service with name '${name}' already exists.` });
+      }
+  
+      let imageURL = null;
+  
+      // Upload to Cloudinary if imageBuffer is available
+      if (imageBuffer) {
         const streamUpload = () => {
-            return new Promise((resolve, reject) => {
-                const stream = cloudinary.uploader.upload_stream({
-                    folder: "Spa Services",
-                    width: 1200,
-                    crop: "scale"
-                }, (error, result) => {
-                    if (result) resolve(result);
-                    else reject(error);
-                });
-
-                streamifier.createReadStream(file.buffer).pipe(stream);
-            });
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: "Spa Services",
+                width: 1200,
+                crop: "scale",
+                resource_type: "image",
+              },
+              (error, result) => {
+                if (result) {
+                  resolve(result);
+                } else {
+                  reject(error);
+                }
+              }
+            );
+            streamifier.createReadStream(imageBuffer).pipe(stream);
+          });
         };
-
+  
         const result = await streamUpload();
+        imageURL = result.secure_url;
+      }
 
-        const data = {
+      // Create service
+      const service = await Services.create(
+        {
             ...req.body,
             userId,
-            imageURL: result.secure_url || null,
-        };
-
-        const service = await Services.create(data);
-        return res.status(201).json({ success: true, message: 'Spa service created successfully.', data: service });
-
+            imageURL,
+        },
+        { transaction }
+      );
+  
+      await transaction.commit();
+  
+      return res.status(201).json({
+        success: true,
+        message: 'Spa service created successfully.',
+        data: service,
+      });
+  
     } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: 'An error occurred while creating the service.', error: error.message });
+      console.error(error);
+      await transaction.rollback();
+      return res.status(500).json({
+        success: false,
+        message: 'An error occurred while creating the service.',
+        error: error.message,
+      });
     }
 };
-
-
-// const isDecimal = (value) => {
-//     return !isNaN(value) && /^\d+(\.\d{1,2})?$/.test(value);
-// };
-
-// // Create a new spa service
-// exports.createService = async (req, res) => {
-//     try {
-//         const { name, categoryId, price, duration, discount } = req.body;
-//         const {file} = req;
-//         const userId = req.user?.id || req.body.id;
-//         if(!name || !categoryId || !price || !file || !userId){
-//             return res.status(400).json({ success: false, message: 'Missing the required fields.'});
-//         }
-//         if (!name || name.length < 3) {
-//             return res.status(400).json({ error: "Name must be at least 3 characters." });
-//         }
-//         if (!categoryId) {
-//             return res.status(400).json({ error: "Category ID is required." });
-//         }
-//         if (!price || !isDecimal(price)) {
-//             return res.status(400).json({ error: "Price must be a valid decimal number." });
-//         }
-//         if (discount && !isDecimal(discount)) {
-//             return res.status(400).json({ error: "Discount must be a valid decimal number." });
-//         }
-
-//         if (duration && (isNaN(duration) || duration < 1)) {
-//             return res.status(400).json({ error: "Duration must be a positive number." });
-//         }
-//         const existingService = await Services.findOne({ where: { name, categoryId, price } });
-//         if (existingService) {
-//             return res.status(400).json({ success: false, message: `A service with name '${name}' already exists.`});
-//         }
-//         const result = await cloudinary.uploader.upload(req.file?.path, {
-//                 folder: "Blogs",
-//                 width: 1200,
-//                 crop: "scale"
-//         });
-//         const data = {
-//             ...req.body, 
-//             userId, 
-//             imageURL: result.secure_url || null,
-//         }
-//         const service = await Services.create(data);
-//         return res.status(201).json({ success: true, message: 'Spa service created successfully.', data: service });
-//     } catch (error) {
-//         console.error(error);
-//         return res.status(500).json({ success: false, message: 'An error occurred while creating the service.', error: error.message });
-//     }
-// };
-
+  
 
 
 // Get all bookings with related data

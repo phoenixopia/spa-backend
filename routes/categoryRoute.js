@@ -6,7 +6,7 @@ const multer = require('multer');
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-router.post('/create',isAuthenticated, upload.single('file'), createCategory);
+router.post('/create',isAuthenticated, upload.single('image'), createCategory);
 router.get('/', getAllCategories);
 router.get('/:id', getCategoryById);
 router.put('/edit/:id',isAuthenticated, updateCategory);

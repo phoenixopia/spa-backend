@@ -3,54 +3,105 @@ const { Op } = require('sequelize');
 const streamifier = require('streamifier');
 
 
-// Create new
+// create new
 exports.createCategory = async (req, res) => {
-    try {
-        const { name } = req.body;
-        const file = req.file;
-
-        if (!name || !file) {
-            return res.status(400).json({ success: false, message: 'Missing the required field.' });
-        }
-
-        const existingCategory = await Categories.findOne({ where: { name } });
-        if (existingCategory) {
-            return res.status(400).json({ success: false, message: `A category with name '${name}' already exists.` });
-        }
-
-        const streamUpload = () => {
-            return new Promise((resolve, reject) => {
-                const stream = cloudinary.uploader.upload_stream({
-                    folder: "Spa Blogs",
-                    width: 1200,
-                    crop: "scale"
-                }, (error, result) => {
-                    if (result) {
-                        resolve(result);
-                    } else {
-                        reject(error);
-                    }
-                });
-
-                streamifier.createReadStream(file.buffer).pipe(stream);
-            });
-        };
-
-        const result = await streamUpload();
-
-        const data = {
-            ...req.body,
-            imageURL: result.secure_url || null,
-        };
-
-        const category = await Categories.create(data);
-        return res.status(201).json({ success: true, message: 'Category created successfully.', data: category });
-
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: 'An error occurred while creating the category.', error: error.message });
+    const { name, image } = req.body;
+    const userId = req.user?.id || req.body.id;
+  
+    let imageBuffer = null;
+  
+    // 1. Handle uploaded file (e.g., from multipart/form-data)
+    if (req.file && req.file.buffer) {
+      imageBuffer = req.file.buffer;
+  
+    // 2. Handle base64 image string (e.g., from JSON body)
+    } else if (image && image.startsWith('data:image')) {
+      try {
+        const base64Data = image.split(';base64,').pop();
+        imageBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid base64 image format." });
+      }
+  
+    // 3. Handle stringified Buffer like "<Buffer ...>"
+    } else if (image && image.startsWith('<Buffer')) {
+      try {
+        const hex = image
+          .replace('<Buffer ', '')
+          .replace('>', '')
+          .trim()
+          .split(' ')
+          .map((byte) => parseInt(byte, 16));
+        imageBuffer = Buffer.from(hex);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid buffer image format." });
+      }
     }
-};
+  
+    // Validate required fields
+    if (!userId || !name) {
+      return res.status(400).json({ success: false, message: "Missing required fields." });
+    }
+  
+    const transaction = await sequelize.transaction();
+  
+    try {
+      // Prevent duplicate category by the same user
+      const existingCategory = await Categories.findOne({ where: { name, userId }, transaction });
+      if (existingCategory) {
+        await transaction.rollback();
+        return res.status(409).json({ success: false, message: "A category with this name already exists for this user." });
+      }
+  
+      let imageURL = null;
+  
+      // Upload to Cloudinary if image exists
+      if (imageBuffer) {
+        const streamUpload = () => {
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: "Spa Categories",
+                width: 800,
+                crop: "scale",
+                resource_type: "image",
+              },
+              (error, result) => {
+                if (result) {
+                  resolve(result);
+                } else {
+                  reject(error);
+                }
+              }
+            );
+            streamifier.createReadStream(imageBuffer).pipe(stream);
+          });
+        };
+  
+        const result = await streamUpload();
+        imageURL = result.secure_url;
+      }
+  
+      // Create category
+      const category = await Categories.create(
+        {
+         ...req.body,
+          userId,
+          imageURL,
+        },
+        { transaction }
+      );
+  
+      await transaction.commit();
+  
+      return res.status(201).json({ success: true, message: "Category created successfully", data: category });
+  
+    } catch (error) {
+      console.error(error);
+      await transaction.rollback();
+      return res.status(500).json({ success: false, message: "Failed to create category", error: error.message });
+    }
+};  
 
 
 

@@ -7,7 +7,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 
-router.post('/create',isAuthenticated,upload.single('file'), createService)
+router.post('/create',isAuthenticated,upload.single('image'), createService)
 router.get('/', getAllServices);
 router.get('/:id', getServiceById);
 router.get('/search/category/:id', getServiceForCategory);

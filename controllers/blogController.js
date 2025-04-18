@@ -80,51 +80,95 @@ exports.getBlogsForUser = async (req, res) => {
 
 // create
 exports.createBlog = async (req, res) => {
-    const { title, content, status } = req.body;
-    const file = req.file;
+    const { title, content, status, image } = req.body;
     const userId = req.user?.id || req.body.id;
   
-    if (!userId || !title || !content || !file) {
+    let imageBuffer = null;
+  
+    // 1. Handle uploaded file (e.g., from multipart/form-data)
+    if (req.file && req.file.buffer) {
+      imageBuffer = req.file.buffer;
+  
+    // 2. Handle base64 image string (e.g., from JSON body)
+    } else if (image && image.startsWith('data:image')) {
+      try {
+        const base64Data = image.split(';base64,').pop();
+        imageBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid base64 image format." });
+      }
+  
+    // 3. Handle stringified Buffer like "<Buffer ...>"
+    } else if (image && image.startsWith('<Buffer')) {
+      try {
+        const hex = image
+          .replace('<Buffer ', '')
+          .replace('>', '')
+          .trim()
+          .split(' ')
+          .map((byte) => parseInt(byte, 16));
+        imageBuffer = Buffer.from(hex);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid buffer image format." });
+      }
+    }
+  
+    // Validate required fields
+    if (!userId || !title || !content) {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
   
     const transaction = await sequelize.transaction();
   
     try {
+      // Prevent duplicate blog by the same user
       const existingBlog = await Blogs.findOne({ where: { title, content, userId }, transaction });
       if (existingBlog) {
         await transaction.rollback();
-        return res.status(409).json({ success: false, message: "A blog with this title and content already exists for this author" });
+        return res.status(409).json({ success: false, message: "A blog with this title and content already exists for this author." });
       }
   
-      const streamUpload = () => {
-        return new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream({
-            folder: "Spa Blogs",
-            width: 1200,
-            crop: "scale"
-          }, (error, result) => {
-            if (result) {
-              resolve(result);
-            } else {
-              reject(error);
-            }
+      let imageURL = null;
+  
+      // Upload to Cloudinary if image exists
+      if (imageBuffer) {
+        const streamUpload = () => {
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: "Spa Blogs",
+                width: 1200,
+                crop: "scale",
+                resource_type: "image",
+              },
+              (error, result) => {
+                if (result) {
+                  resolve(result);
+                } else {
+                  reject(error);
+                }
+              }
+            );
+            streamifier.createReadStream(imageBuffer).pipe(stream);
           });
+        };
   
-          streamifier.createReadStream(file.buffer).pipe(stream);
-        });
-      };
-  
-      const result = await streamUpload();
+        const result = await streamUpload();
+        imageURL = result.secure_url;
+      }
   
       const publishedAt = status === "published" ? new Date() : null;
   
-      const blog = await Blogs.create({
-        ...req.body,
-        userId,
-        publishedAt,
-        imageURL: result.secure_url || null,
-      }, { transaction });
+      // Create blog
+      const blog = await Blogs.create(
+        {
+          ...req.body,
+          userId,
+          publishedAt,
+          imageURL,
+        },
+        { transaction }
+      );
   
       await transaction.commit();
   
@@ -135,7 +179,7 @@ exports.createBlog = async (req, res) => {
       await transaction.rollback();
       return res.status(500).json({ success: false, message: "Failed to create blog", error: error.message });
     }
-};
+};  
 
   
 

@@ -7,7 +7,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 
-router.post('/create',isAuthenticated, upload.single('file'), createBlog)
+router.post('/create',isAuthenticated, upload.single('image'), createBlog)
 router.get('/', getAllBlogs);
 router.get('/:id', getBlogById);
 router.get('/search/user/:id', getBlogsForUser);

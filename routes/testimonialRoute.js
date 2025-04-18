@@ -7,7 +7,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 
-router.post('/create', isAuthenticated, upload.single('file'), createTestimonial)
+router.post('/create', isAuthenticated, upload.single('image'), createTestimonial)
 router.get('/', getAllTestimonials);
 router.get('/:id', getTestimonialById);
 router.get('/user/:userId?', getUserTestimonials);
