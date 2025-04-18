@@ -1,34 +1,44 @@
 const { sequelize, Users, Bookings, Services, Notifications } = require('../models/index');
 const { notifyAdmins } = require('../socket');
+const { sendSMS } = require('../utils/sms');
+const { createBookingNotificationForAdmin } = require('./notificationController');
+const { Op } = require('sequelize');
+const moment = require('moment'); // Or use native Date if you prefer
 
 
 // Create a new booking
 exports.createBooking = async (req, res) => {
     const transaction = await sequelize.transaction();
     try {
-        const { firstName, lastName, phoneNumber, bookingDatetime, serviceId } = req.body;
-        if (!firstName || !lastName || !phoneNumber || !serviceId || !bookingDatetime) {
+        const { firstName, lastName, phoneNumber, dateTime, serviceId } = req.body;
+        if (!firstName || !lastName || !phoneNumber || !serviceId || !dateTime) {
             return res.status(400).json({ success: false, message: 'All required fields must be provided.' });
         }
         const existingBooking = await Bookings.findOne({
-            where: { firstName, lastName, phoneNumber, bookingDatetime, serviceId },
+            where: { firstName, lastName, phoneNumber, dateTime, serviceId },
             transaction,
         });
         if (existingBooking) {
             await transaction.rollback();
             return res.status(400).json({ success: false, message: 'A booking already exists for this customer at the same time.' });
         }
-        const newBooking = await Bookings.create(req.body, { transaction });
+        const newBooking = await Bookings.create(req.body, {
+             transaction 
+        });
 
-        // Notify admins about the new booking
-        const bookingData = {
-            message: `A new booking has been created: ${newBooking.id}`,
-            booking: newBooking,
-        };
+        const serviceData = await Services.findOne({
+            where: { id: serviceId },
+            attributes: ["name"]
+        });
 
-        // Send notification to admins about the new booking
-        await notifyAdmins('newBooking', bookingData);  // Send notification to admins
-
+        // // Send notification to admins about the new booking
+        // const bookingData = {
+        //     message: `A new booking has been created: ${newBooking.id}`,
+        //     booking: newBooking,
+        // };
+        // await notifyAdmins('newBooking', bookingData);  // Send notification to admins
+        
+        await createBookingNotificationForAdmin(newBooking, "Creation", "Sent", transaction, serviceData)
         await transaction.commit();
         return res.status(201).json({ success: true, message: 'Booking created successfully.', data: newBooking });
     } catch (error) {
@@ -44,7 +54,7 @@ exports.updateBooking = async (req, res) => {
     try {
         const id = req.params.id;
         if (!id) {
-            return res.status(400).json({ message: 'Please provide an Id.' });
+            return res.status(400).json({success:false, message: 'Please provide an Id.' });
         }
         const booking = await Bookings.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
         if (!booking) {
@@ -58,6 +68,21 @@ exports.updateBooking = async (req, res) => {
             await transaction.rollback();
             return res.status(304).json({ success: false, message: 'Booking has no update!' });
         }
+        // await notifyUserOnBookingUpdate(updatedBooking, "Confirmed");
+        const formattedDateTime = new Date(updatedBooking.dateTime).toLocaleString('en-US', {
+            weekday: 'long', 
+            month: 'long', 
+            day: 'numeric', 
+            year: 'numeric', 
+            hour: 'numeric', 
+            minute: '2-digit', 
+            hour12: true 
+        });
+        const message = `Your appointment at Fana Spa is ${updatedBooking.status} for ${formattedDateTime}. Please arrive a few minutes early to enjoy a seamless experience.`;
+        // if(updatedBooking.status === updates.status){
+        //     await sendSMS(booking.firstName, booking.lastName, booking.phoneNumber, message);
+        // }
+        
         await transaction.commit();
         return res.status(200).json({ success: true, message: 'Booking updated successfully.', data: updatedBooking });
     } catch (err) {
@@ -71,14 +96,68 @@ exports.updateBooking = async (req, res) => {
 // Get all bookings with related data
 exports.getAllBookings = async (req, res) => {
     try {
+        const { page, limit } = req.query;
+        const pageNumber = parseInt(page, 10) || 1;
+        const pageSize = parseInt(limit, 10) || 10;
+        const bookingCount = await Bookings.count();
+        const totalPages = Math.ceil(bookingCount / pageSize);
         const bookings = await Bookings.findAll({
-            include: [
-                // { model: Notifications, as: 'notification',},
-                { model: Services, as: 'service',},
-            ]
+            include: [{ model: Services, as: 'service',}],
+            where: {status: { [Op.notIn]: ["Rejected"] }},
+            offset: (pageNumber - 1) * pageSize,
+            limit: pageSize,
+            order: [['updatedAt', 'DESC']],
+        }); 
+        if (bookings.length === 0) {
+            return res.status(404).json({ success: false, message: 'No bookings found.'});
+        }
+        return res.status(200).json({ 
+            success: true, 
+            data: bookings,
+            pagination: { total: bookingCount, page: pageNumber, pageSize, totalPages,}
         });
-        return res.status(200).json({ success: true, data: bookings });
     } catch (error) {
+        console.error(error);
+        return res.status(500).json({ success: false, message: 'Error fetching bookings.', error: error.message });
+    }
+};
+
+
+// Get todays bookings with related data
+exports.getTodayBookings = async (req, res) => {
+    try {
+        const { page, limit } = req.query;
+        const pageNumber = parseInt(page, 10) || 1;
+        const pageSize = parseInt(limit, 10) || 10;
+        const startOfDay = moment().startOf('day').toDate();
+        const endOfDay = moment().endOf('day').toDate();
+        const bookingCount = await Bookings.count({
+            where: {
+                createdAt: { [Op.between]: [startOfDay, endOfDay],},
+                where: {status: { [Op.notIn]: ["Rejected"] }},
+            },
+        });
+        const totalPages = Math.ceil(bookingCount / pageSize);
+
+        const bookings = await Bookings.findAll({
+            where: {
+                createdAt: { [Op.between]: [startOfDay, endOfDay],},
+            },
+            include: [{ model: Services, as: 'service',}],
+            offset: (pageNumber - 1) * pageSize,
+            limit: pageSize,
+            order: [['updatedAt', 'DESC']],
+        }); 
+        // if (bookings.length === 0) {
+        //     return res.status(404).json({ success: false, message: 'No bookings found.'});
+        // }
+        return res.status(200).json({ 
+            success: true, 
+            data: bookings,
+            pagination: { total: bookingCount, page: pageNumber, pageSize, totalPages,}
+        });
+    } catch (error) {
+        console.error(error);
         return res.status(500).json({ success: false, message: 'Error fetching bookings.', error: error.message });
     }
 };
@@ -87,6 +166,9 @@ exports.getAllBookings = async (req, res) => {
 exports.getBookingById = async (req, res) => {
     try {
         const { id } = req.params;
+        if (!id) {
+            return res.status(400).json({success:false, message: 'Please provide an Id.' });
+        }
         const booking = await Bookings.findByPk(id, {
             include: [
                 { model: Services, as: 'service' },
@@ -97,6 +179,7 @@ exports.getBookingById = async (req, res) => {
         }
         return res.status(200).json({ success: true, data: booking });
     } catch (error) {
+        console.error(error);
         return res.status(500).json({ success: false, message: 'Error fetching booking.', error: error.message });
     }
 };
@@ -108,29 +191,71 @@ exports.getBookingsByPhone = async (req, res) => {
         if (!phone) {
             return res.status(400).json({ success: false, message: 'Phone number is required.' });
         }
+        const { page, limit } = req.query;
+        const pageNumber = parseInt(page, 10) || 1;
+        const pageSize = parseInt(limit, 10) || 10;
+        const bookingCount = await Bookings.count();
+        const totalPages = Math.ceil(bookingCount / pageSize);
         const bookings = await Bookings.findAll({
             where: { phone },
             include: [{ model: Services, as: 'service' }],
-        });
+            where: {status: { [Op.notIn]: ["Rejected"] }},
+            offset: (pageNumber - 1) * pageSize,
+            limit: pageSize,
+            order: [['updatedAt', 'DESC']],
+        }); 
         if (bookings.length === 0) {
-            return res.status(404).json({ success: false, message: 'No bookings found for this phone number.' });
+            return res.status(404).json({ success: false, message: 'No bookings found for this phone number.'});
         }
-        return res.status(200).json({ success: true, data: bookings });
+        return res.status(200).json({ 
+            success: true, 
+            data: bookings,
+            pagination: { total: bookingCount, page: pageNumber, pageSize, totalPages,}
+        });
     } catch (error) {
+        console.error(error);
         return res.status(500).json({ success: false, message: 'Error fetching bookings.', error: error.message });
     }
 };
+
+
+// Delete a booking with transaction
+exports.deleteBooking = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { id } = req.params;
+        const booking = await Bookings.findByPk(id, { transaction, lock: t.LOCK.UPDATE });
+        if (!booking) {
+            await t.rollback();
+            return res.status(404).json({ success: false, message: 'Booking not found.' });
+        }
+        await booking.destroy({ transaction: t });
+        // Send notification to admin about the booking deleted
+        await Notifications.create({
+            userId: booking.userId,
+            message: `Booking ${booking.id} has been deleted.$ by user ${booking.userId}.`,
+            bookingId: booking.id,
+            type: `${booking.status}`,
+        }, { transaction: t });
+        await transaction.commit();
+        return res.status(200).json({ success: true, message: 'Booking deleted successfully.' });
+    } catch (error) {
+        await t.rollback();
+        return res.status(500).json({ success: false, message: 'Error deleting booking.', error: error.message });
+    }
+};
+
 
 // // Create a new booking with validation, duplication check & transaction
 // exports.createBooking = async (req, res) => {
 //     const transaction = await sequelize.transaction();
 //     try {
-//         const { userId, serviceId, bookingDatetime, payment_method, status, notes } = req.body;
-//         if (!userId || !serviceId || !bookingDatetime ) {
+//         const { userId, serviceId, datetime, payment_method, status, notes } = req.body;
+//         if (!userId || !serviceId || !datetime ) {
 //             return res.status(400).json({ success: false, message: 'All required fields must be provided.' });
 //         }
 //         const existingBooking = await Bookings.findOne({
-//             where: { userId, serviceId, bookingDatetime, status, notes},
+//             where: { userId, serviceId, datetime, status, notes},
 //             transaction,
 //         });
 //         if (existingBooking) {
@@ -230,29 +355,3 @@ exports.getBookingsByPhone = async (req, res) => {
 //         return res.status(500).json({ success: false, message: 'Server Error', error: err.message });
 //     }
 // };
-
-// Delete a booking with transaction
-exports.deleteBooking = async (req, res) => {
-    const transaction = await sequelize.transaction();
-    try {
-        const { id } = req.params;
-        const booking = await Bookings.findByPk(id, { transaction, lock: t.LOCK.UPDATE });
-        if (!booking) {
-            await transaction.rollback();
-            return res.status(404).json({ success: false, message: 'Booking not found.' });
-        }
-        await booking.destroy({ transaction });
-        // Send notification to admin about the booking deleted
-        await Notifications.create({
-            userId: booking.userId,
-            message: `Booking ${booking.id} has been deleted.$ by user ${booking.userId}.`,
-            bookingId: booking.id,
-            type: `${booking.status}`,
-        }, { transaction });
-        await transaction.commit();
-        return res.status(200).json({ success: true, message: 'Booking deleted successfully.' });
-    } catch (error) {
-        await transaction.rollback();
-        return res.status(500).json({ success: false, message: 'Error deleting booking.', error: error.message });
-    }
-};

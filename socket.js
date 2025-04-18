@@ -14,7 +14,7 @@ const initializeSocket = (server) => {
         // Handle user login event to store the socket ID
         socket.on('userLoggedIn', (user) => {
             console.log('\nuser role: ', user.role)
-            if (user.role === 'Admin') {
+            if (user.role === 'admin') {
                 userSockets[user.id] = socket.id;  // Store socket ID for the admin
                 console.log(`Admin ${user.id} connected with socket id: ${socket.id}`);
             }
@@ -36,7 +36,7 @@ const initializeSocket = (server) => {
 const notifyAdmins = async (event, data) => {
     try {
         // Fetch admin users from the database
-        const admins = await Users.findAll({ where: {role: 'Admin'}, });
+        const admins = await Users.findAll({ where: {role: 'admin'}, });
         console.log()
         // Emit the event to each admin user
         admins.forEach(admin => {
@@ -98,7 +98,7 @@ module.exports = { io, initializeSocket, notifyAdmins, userSockets };
 // const notifyAdmins = async (event, data) => {
 //     try {
 //         // Fetch admin users from the database
-//         const admins = await Users.findAll({ where: { role: 'Admin' } });
+//         const admins = await Users.findAll({ where: { role: 'admin' } });
 
 //         // Emit the event to each admin user
 //         admins.forEach(admin => {

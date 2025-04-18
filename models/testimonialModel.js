@@ -13,16 +13,26 @@ module.exports = (sequelize, DataTypes) => {
                 model: 'Users',
                 key: 'id'
             },
-            },
-        feedback: {
+        },
+        firstName: {
+            type: DataTypes.STRING,
+            allowNull: false
+        },
+        lastName: {
+            type: DataTypes.STRING,
+            allowNull: false
+        },
+        title: {
+            type: DataTypes.STRING,
+            allowNull: false,
+        },
+        message: {
             type: DataTypes.TEXT,
             allowNull: false,
         },
-        rating: {
-            type: DataTypes.INTEGER, // Example: 1-5 stars
-            allowNull: false,
-            defaultValue: 1,
-            validate: { min: 1, max: 5 },
+        imageURL: {
+            type: DataTypes.STRING(500),
+            allowNull: true
         },
     },{
         timestamps: true,

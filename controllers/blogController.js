@@ -1,5 +1,6 @@
 const { sequelize, Blogs } = require("../models"); // Sequelize instance
-
+const cloudinary= require('../utils/cloudinary');
+const streamifier = require('streamifier');
 
 // Get all blogs with pagination
 exports.getAllBlogs = async (req, res) => {
@@ -13,17 +14,19 @@ exports.getAllBlogs = async (req, res) => {
         const blogs = await Blogs.findAll({
             offset: (pageNumber - 1) * pageSize,
             limit: pageSize,
-            order: [['createdAt', 'ASC']], 
-        }); // Sorting by createdAt in ascending order
+            order: [['updatedAt', 'DESC']],
+        }); 
         return res.status(200).json({ 
             success: true, 
             data: blogs,
             pagination: { total: blogCount, page: pageNumber, pageSize, totalPages,}
         });
     } catch (error) {
+        console.error(error)
         return res.status(500).json({ success:false, message: "Error fetching blogs", error: error.message });
     }
 };
+
 
 // Get a blog by ID
 exports.getBlogById = async (req, res) => {
@@ -38,15 +41,16 @@ exports.getBlogById = async (req, res) => {
       }
       return res.status(200).json({ success:true, data: blog });
     } catch (error) {
-      await transaction.rollback(); // Rollback on error
-      return res.status(500).json({success:false, message: "Error fetching a blog", error: error.message });
+        console.error(error)
+        await transaction.rollback(); // Rollback on error
+        return res.status(500).json({success:false, message: "Error fetching a blog", error: error.message });
     }
 };  
 
 // Get blogs for a specific user
-exports.getUserBlogs = async (req, res) => {
-    const id = req.user.id || req.params.userId;
-    if (!id) {
+exports.getBlogsForUser = async (req, res) => {
+    const userId = req.user.id || req.params.id;
+    if (!userId) {
         return res.status(400).json({ message: 'Please provide a blog Id.' });
     }
     try {
@@ -57,48 +61,83 @@ exports.getUserBlogs = async (req, res) => {
         const totalPages = Math.ceil(blogCount / pageSize);
 
         const blogs = await Blogs.findAll({
-            where: { userId: id },
+            where: { userId },
             offset: (pageNumber - 1) * pageSize,
             limit: pageSize,
-            order: [['createdAt', 'ASC']], 
-        }); // Sorting by createdAt in ascending order
+            order: [['updatedAt', 'DESC']],
+        });
         return res.status(200).json({ 
             success: true, 
             data: blogs,
             pagination: { total: blogCount, page: pageNumber, pageSize, totalPages,}
         });
     } catch (error) {
+        console.error(error)
         return res.status(500).json({ success:false, error: "Error fetching blogs", details: error.message });
     }
 }; 
 
-//Create a new blog post with transaction support
-exports.createBlog = async (req, res) => {
-    const { title, content, tags, status } = req.body;
-    const userId = req.user.id;
-    if (!title || !content || !userId) {
-        return res.status(400).json({success: false, message: "Missing the equired fields." });
-    }
-    const transaction = await sequelize.transaction(); 
-    try {
-        const existingBlog = await Blogs.findOne({ where: { title, content, userId }, transaction });
-        if (existingBlog) {
-            await transaction.rollback();
-            return res.status(409).json({success: false, message: "A blog with this title and content already exists for this author" });
-        }
-        const publishedAt = (status === "published") ? new Date() : null;
-        const blog = await Blogs.create(
-            { title, content, tags, status, userId, publishedAt}, 
-            { transaction }
-        );
-        await transaction.commit();
-        return res.status(201).json({ success: true, message: "Blog created successfully", data: blog });
 
+// create
+exports.createBlog = async (req, res) => {
+    const { title, content, status } = req.body;
+    const file = req.file;
+    const userId = req.user?.id || req.body.id;
+  
+    if (!userId || !title || !content || !file) {
+      return res.status(400).json({ success: false, message: "Missing required fields." });
+    }
+  
+    const transaction = await sequelize.transaction();
+  
+    try {
+      const existingBlog = await Blogs.findOne({ where: { title, content, userId }, transaction });
+      if (existingBlog) {
+        await transaction.rollback();
+        return res.status(409).json({ success: false, message: "A blog with this title and content already exists for this author" });
+      }
+  
+      const streamUpload = () => {
+        return new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream({
+            folder: "Spa Blogs",
+            width: 1200,
+            crop: "scale"
+          }, (error, result) => {
+            if (result) {
+              resolve(result);
+            } else {
+              reject(error);
+            }
+          });
+  
+          streamifier.createReadStream(file.buffer).pipe(stream);
+        });
+      };
+  
+      const result = await streamUpload();
+  
+      const publishedAt = status === "published" ? new Date() : null;
+  
+      const blog = await Blogs.create({
+        ...req.body,
+        userId,
+        publishedAt,
+        imageURL: result.secure_url || null,
+      }, { transaction });
+  
+      await transaction.commit();
+  
+      return res.status(201).json({ success: true, message: "Blog created successfully", data: blog });
+  
     } catch (error) {
-        await transaction.rollback(); // Rollback transaction on error
-        return res.status(500).json({ success: false, message: "Failed to create blog", error: error.message });
+      console.error(error);
+      await transaction.rollback();
+      return res.status(500).json({ success: false, message: "Failed to create blog", error: error.message });
     }
 };
+
+  
 
 // Update a blog post with transaction and row locking
 exports.updateBlog = async (req, res) => {
@@ -121,10 +160,10 @@ exports.updateBlog = async (req, res) => {
         }
         await t.commit();
         return res.status(200).json({ success: true, message: 'Updated successfully.', data: updatedBlog,});
-    } catch (err) {
+    } catch (error) {
         await t.rollback();
-        console.log(err);
-        return res.status(500).json({ success: false, message: 'Failed to update a blog.', error: err.message });
+        console.error(error);
+        return res.status(500).json({ success: false, message: 'Failed to update a blog.', error: error.message });
     }
 };
       
@@ -142,11 +181,12 @@ exports.deleteBlog = async (req, res) => {
             await t.rollback();
             return res.status(404).json({ error: "Blog not found" });
         }
-        await blog.destroy({ transaction });
+        await blog.destroy({ transaction: t });
         await t.commit();
         return res.status(200).json({success:true, message: "Blog deleted successfully" });
     } catch (error) {
         await t.rollback();
+        console.error(error)
         return res.status(500).json({ error: "Error deleting blog", details: error.message });
     }
 };

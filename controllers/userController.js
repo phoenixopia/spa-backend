@@ -1,5 +1,5 @@
 const { Op } = require("sequelize");
-const { sequelize, Users, Bookings, Services, Notifications } = require('../models/index');
+const { sequelize, Users, Notifications } = require('../models/index');
 
 
 // capitalize names
@@ -9,7 +9,7 @@ const capitalizeName = (name) => {
 
 // create a new user
 exports.createUser = async (req, res) => {
-    const { firstName, lastName, email, password, role } = req.body;
+    const { firstName, lastName, email, password } = req.body;
     const t = await sequelize.transaction();
     try {
         if (!firstName || !lastName || !email || !password) {
@@ -26,23 +26,23 @@ exports.createUser = async (req, res) => {
         const formattedFirstName = capitalizeName(firstName);
         const formattedLastName = capitalizeName(lastName);
         const newUser = await Users.create(
-            { firstName: formattedFirstName, lastName: formattedLastName, email, password, role: role || 'User', isConfirmed: true, userType: 'User'},  { transaction: t }
+            { firstName: formattedFirstName, lastName: formattedLastName, email, password, isConfirmed: true},  { transaction: t }
         );
         await t.commit();
         return res.status(201).json({ success: true, message: 'User created successfully.', data: newUser });
     } catch (error) {
         await t.rollback();
         console.error('Error creating user:', error);
-        return res.status(500).json({ success: false, message: 'Internal Server Error.' });
+        return res.status(500).json({ success: false, message: 'Internal Server Error.', error: error.message });
     }
 };
 
 //show a user
 exports.show = async (req, res) => {
     try{
-        const id = req.params.id || req.user.id;
+        const id = req.params?.id || req.user?.id;
         if (!id) {
-            return res.status(400).json({ message: 'Please provide a user Id.' });
+            return res.status(400).json({ success: false, message: 'Please provide a user Id.' });
         }
         const user = await Users.findByPk(id, {
           include: [
@@ -50,9 +50,9 @@ exports.show = async (req, res) => {
           ],
         });
         return res.status(200).json({success: true, data: user});
-    }catch(err){
-        console.error(err);
-        return res.status(500).json({success: false, message:'Failed to show a user.', error:err.message});
+    }catch(error){
+        console.error(error);
+        return res.status(500).json({success: false, message:'Failed to show a user.', error:error.message});
     }
 }
 
@@ -66,22 +66,22 @@ exports.getAll = async (req, res, next) => {
     const userCount = await Users.count();
     const totalPages = Math.ceil(userCount / pageSize);
     const users = await Users.findAll({
-      // where: {role: 'Admin'},
+      // where: {role: 'admin'},
       include: [
         { model: Notifications, as: 'notification'},
       ],
       offset: (pageNumber - 1) * pageSize,
       limit: pageSize,
-      order: [['createdAt', 'ASC']], 
-    }); // Sorting by createdAt in ascending order
+      order: [['updatedAt', 'DESC']], 
+    });
     return res.status(200).json({ 
       success: true, 
       data: users,
       pagination: { total: userCount, page: pageNumber, pageSize, totalPages,}
     });
-  } catch (err) {
-    console.log('error occurred', err);
-    return res.status(500).json({ success: false,message: 'Failed to show all users.', error: err.message });
+  } catch (error) {
+    console.error('error occurred', error);
+    return res.status(500).json({ success: false,message: 'Failed to show all users.', error: error.message });
   }
 };
 
@@ -92,6 +92,9 @@ exports.update = async (req, res, next) => {
   const id = req.params.id || req.user.id;
   if (!id) {
       return res.status(400).json({ message: 'Please provide a user Id.' });
+  }
+  if (req.user?.role === 'super-admin') {
+    return res.status(400).json({ success: false, message: 'Can not edit the user with "admin" role.' });
   }
   const t = await sequelize.transaction();
   try {
@@ -107,10 +110,10 @@ exports.update = async (req, res, next) => {
     }
     await t.commit();
     return res.status(200).json({ success: true, message: 'Updated successfully.', data: updatedUser,});
-  } catch (err) {
+  } catch (error) {
     await t.rollback();
-    console.log(err);
-    return res.status(500).json({ success: false, message: 'Server Error', error: err.message });
+    console.error(error);
+    return res.status(500).json({ success: false, message: 'Server Error', error: error.message });
   }
 };
 
@@ -123,6 +126,9 @@ exports.deleteUser = async (req, res) => {
     if (!id) {
         return res.status(400).json({ success: false, message: 'Please provide a user Id.' });
     }
+    if (req?.user?.role === 'super-admin') {
+      return res.status(400).json({ success: false, message: 'Can not deleted the user with "admin" role.' });
+    }
     const user = await Users.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!user) {
       await t.rollback();
@@ -134,9 +140,9 @@ exports.deleteUser = async (req, res) => {
     }
     await t.commit();
     return res.status(204).json({success: true, message: 'User deleted successfully', });
-  } catch (err) {
+  } catch (error) {
     await t.rollback();
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Failed to delete a user.', error: err.message,});
+    console.error(error);
+    return res.status(500).json({ success: false, message: 'Failed to delete a user.', error: error.message,});
   }
 };

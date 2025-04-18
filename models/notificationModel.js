@@ -44,12 +44,17 @@ module.exports = (sequelize, DataTypes) => {
                 defaultValue: 'Confirmation', 
             },
             status: {
-                type: DataTypes.STRING,
+                type: DataTypes.ENUM('Pending','Sent', 'Read', 'Archived', 'Failed'),
                 allowNull: false,
+                defaultValue: 'Sent',
                 validate: {
-                    notEmpty: { msg: 'Status cannot be empty' }, //'pending', 'sent', 'read', 'archived'
+                    notEmpty: { msg: 'Status cannot be empty' },
                 }
-            }
+            },
+            isRead: {
+                type: DataTypes.BOOLEAN,
+                defaultValue: false,
+            },
         },
         {
             timestamps: true,

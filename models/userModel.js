@@ -1,6 +1,6 @@
 const bcryptjs = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const ROLES = ['Super Admin', 'Admin', 'Customer', 'Content Manager'];
+const ROLES = ['super-admin', 'admin', 'customer', 'content-manager'];
 const { v4: uuidv4 } = require('uuid');
 // const { PhoneNumberUtil, PhoneNumberFormat } = require('google-libphonenumber');
 // const phoneUtil = PhoneNumberUtil.getInstance();
@@ -51,7 +51,7 @@ module.exports = (sequelize, DataTypes) => {
         role: {
             type: DataTypes.STRING,
             allowNull: false,
-            defaultValue: 'Customer',
+            defaultValue: 'admin',
             // validate: {
             //     isIn: [ROLES],
             // },

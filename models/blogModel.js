@@ -21,32 +21,35 @@ module.exports = (sequelize, DataTypes) => {
         },
         slug: {
             type: DataTypes.STRING,
-            allowNull: false,
-            unique: true,
+            allowNull: true,
+            // unique: true,
         },
         content: {
             type: DataTypes.TEXT,
             allowNull: false,
         },
-        imageUrl: {
+        imageURL: {
             type: DataTypes.STRING(500),
             allowNull: true
         },
-        status: {
-            type: DataTypes.ENUM("draft", "published", "archived"),
-            allowNull: false,
-            defaultValue: "draft",
-        },
         publishedAt: {
             type: DataTypes.DATE,
+            allowNull: true
         },
+        status: {
+            type: DataTypes.ENUM("Draft", "Published", "Archived"),
+            allowNull: false,
+            defaultValue: "Draft",
+            validate: {
+                isIn: [["Draft", "Published", "Archived"]],
+            },
+        },        
     },{
         timestamps: true,
     });
   
     Blog.associate = (models) => {
         Blog.belongsTo(models.Users, { foreignKey: 'userId', as: 'user' });
-        // Blog.belongsTo(models.Users, { foreignKey: "authorId", as: "author" });
     };
   
     return Blog;

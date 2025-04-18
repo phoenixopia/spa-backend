@@ -22,13 +22,14 @@ module.exports = (sequelize, DataTypes) => {
                 type: DataTypes.TEXT,
                 allowNull: true,
             },
-            category: {
-                type: DataTypes.STRING,
+            categoryId: {
+                type: DataTypes.UUID,
+                defaultValue: DataTypes.UUIDV4,
                 allowNull: false,
-                validate: {
-                    notEmpty: true,
-                    len: [3, 50],
-                },
+                references: {
+                    model: 'Categories',
+                    key: 'id'
+                }
             },
             price: {
                 type: DataTypes.DECIMAL(10, 2),
@@ -49,28 +50,28 @@ module.exports = (sequelize, DataTypes) => {
             duration: {
                 type: DataTypes.INTEGER, // Duration in minutes
                 allowNull: false,
+                defaultValue: 30,
                 validate: {
                     min: 1,
                 },
             },
             status: {
-                type: DataTypes.ENUM('active', 'inactive'),
+                type: DataTypes.ENUM('Active', 'Inactive'),
                 allowNull: false,
-                defaultValue: 'active',
+                defaultValue: 'Active',
+            },
+            imageURL: {
+                type: DataTypes.STRING(500),
+                allowNull: true
             },
         },
         {
             timestamps: true,
-            // indexes: [
-            //     {
-            //         unique: true,
-            //         fields: ['name'],
-            //     },
-            // ],
         }
     );
     SpaService.associate = (models) => {
         SpaService.hasMany(models.Bookings, { foreignKey: 'serviceId', as: 'booking' });
+        SpaService.belongsTo(models.Categories, { foreignKey: 'categoryId', as: 'category' });
     };
     
     return SpaService;

@@ -1,7 +1,8 @@
 const { Op } = require('sequelize');
 const moment = require('moment');
-const { sendPasswordResetEmail, sendConfirmationEmail } = require('../utilis/sendEmail');
-const { generateCode } = require('../utilis/generateCode');
+const bcryptjs = require('bcryptjs');
+const { sendPasswordResetEmail, sendConfirmationEmail } = require('../utils/sendEmail');
+const { generateCode } = require('../utils/generateCode');
 const { sequelize, Users } = require('../models/index');
 const { io, userSockets } = require('../socket');
 
@@ -67,12 +68,12 @@ exports.confirm = async (req, res) => {
     await existingUser.save({transaction: t});
     sendTokenResponse(existingUser, 200, res);
 
-    // After successful login, emit the socket event for admins
-    if (existingUser.role === 'Admin') {
-      console.log('\nrole: ', existingUser.role, '\n')
-      io.emit('userLoggedIn', { id: existingUser.id, role: existingUser.role });
-      console.log(`User admin '${existingUser.id}' connected to socket with id: ${userSockets.id}`);
-    }
+    // // After successful login, emit the socket event for admins
+    // if (existingUser.role === 'admin') {
+    //   console.log('\nrole: ', existingUser.role, '\n')
+    //   io.emit('userLoggedIn', { id: existingUser.id, role: existingUser.role });
+    //   console.log(`Admin '${existingUser.id}' connected to socket with id: ${userSockets.id}`);
+    // }
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, message: error.message, stack: error.stack });
@@ -99,10 +100,10 @@ exports.signin = async (req, res) => {
     }
     sendTokenResponse(existingUser, 200, res);
     // After successful login, emit the socket event for admins
-    if (existingUser.role === 'Admin') {
-      io.emit('userLoggedIn', { id: existingUser.id, role: existingUser.role });
-      console.log(`User admin '${existingUser.id}' connected to socket.`);
-    }
+    // if (existingUser.role === 'Admin') {
+    //   io.emit('userLoggedIn', { id: existingUser.id, role: existingUser.role });
+    //   console.log(`User admin '${existingUser.id}' connected to socket.`);
+    // }
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, message: error.message, stack: error.stack });
@@ -121,6 +122,7 @@ exports.logout = async (req, res, next) => {
   }
 }
 
+
 //user forgot password
 exports.forgot = async (req, res) => {
   const { email } = req.body;
@@ -131,7 +133,6 @@ exports.forgot = async (req, res) => {
   try {
     // Generate a unique reset code
     const resetCode = generateCode();
-    // Atomically update user with the reset code
     const [updated] = await Users.update(
       { resetCode },
       { where: { email: { [Op.iLike]: email } }, transaction: t }
@@ -140,7 +141,8 @@ exports.forgot = async (req, res) => {
       await t.rollback();
       return res.status(404).json({ success: false, message: "No account found with this email." });
     }
-    const resetLink = `${process.env.CLIENT_URL}/auth/reset/${resetCode}`;
+
+    const resetLink = `${process.env.CLIENT_URL}/${resetCode}`;
     await sendPasswordResetEmail(email, resetLink);
     await t.commit();
     return res.status(200).json({ success: true, message: "Reset code sent successfully." });
@@ -159,17 +161,17 @@ exports.reset = async (req, res) => {
   if (!email || !password || !resetCode) {
     return res.status(400).json({ success: false, message: "All fields are required." });
   }
-  const transaction = await sequelize.transaction();
+  const t = await sequelize.transaction();
   try {
     // Find the user with the reset code
     const existingUser = await Users.findOne({
-      where: { email: { [Op.iLike]: email }, resetCode },
+      where: { email, resetCode },
       lock: t.LOCK.UPDATE, // Ensures that no other transaction can modify this row
       transaction: t
     });
     if (!existingUser) {
       await t.rollback();
-      return res.status(400).json({ success: false, message: "Invalid reset code or email address." });
+      return res.status(404).json({ success: false, message: "User Not Found." });
     }
     // Check if reset code is expired (valid for 10 minutes)
     const resetExpirationTime = moment.utc(existingUser.updatedAt).add(10, "minutes");
@@ -177,13 +179,13 @@ exports.reset = async (req, res) => {
       return res.status(410).json({ success: false, message: "Reset code expired. Please request a new one." });
     }
     // Hash the new password
-    existingUser.password = await bcrypt.hash(password, 10);
+    existingUser.password = await bcryptjs.hash(password, 10);
     existingUser.resetCode = null;
-    await existingUser.save({ transaction });
-    await transaction.commit();
+    await existingUser.save({ transaction: t });
+    await t.commit();
     return res.status(200).json({ success: true, message: "Password reset successfully. You may now log in." });
   } catch (error) {
-    await transaction.rollback();
+    await t.rollback();
     console.error("Password reset error:", error);
     return res.status(500).json({ success: false, message: "An error occurred while resetting the password.", error: error.message });
   }
@@ -194,10 +196,12 @@ const sendTokenResponse = async (user, statusCode, res) => {
     try {
         const token = await user.getJwtToken();
         const cookieOptions = {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production', // Only in HTTPS
-            sameSite: 'Strict', 
-            maxAge: 8 * 60 * 60 * 1000, // 8 hours
+          httpOnly: true,
+          // secure: true, // Only in HTTPS
+          // sameSite: 'None', 
+          secure: false, // only for local dev!
+          sameSite: 'Lax', // or 'None' if secure is true
+          maxAge: 8 * 60 * 60 * 1000, // 8 hours
         };
         return res.status(statusCode)
             .cookie('token', token, cookieOptions)

@@ -35,17 +35,20 @@ module.exports = (sequelize, DataTypes) => {
                     }
                 },
             },
-            bookingDatetime: {
+            dateTime: {
                 type: DataTypes.DATE,
                 allowNull: false,
                 validate: {
-                    isDate: true,
+                  isDate: true,
                 },
             },
             status: {
-                type: DataTypes.STRING,
+                type: DataTypes.ENUM("Pending", "Approved", "Rejected"),
                 allowNull: false,
-                defaultValue: 'pending',
+                defaultValue: "Pending",
+                validate: {
+                    isIn: [["Pending", "Approved", "Rejected"]],
+                },
             },
             notes: {
                 type: DataTypes.TEXT,
@@ -54,7 +57,7 @@ module.exports = (sequelize, DataTypes) => {
             payment_status: {
                 type: DataTypes.STRING,
                 allowNull: false,
-                defaultValue: 'unpaid',
+                defaultValue: 'Unpaid',
             },
             payment_method: {
                 type: DataTypes.STRING,
@@ -78,7 +81,7 @@ module.exports = (sequelize, DataTypes) => {
     Booking.associate = (models) => {
         // Booking.belongsTo(models.Users, { foreignKey: 'userId', as: 'user' });
         Booking.belongsTo(models.Services, { foreignKey: 'serviceId', as: 'service' });
-        Booking.hasMany(models.Notifications, { foreignKey: 'bookingId', as: 'notification' });
+        Booking.hasOne(models.Notifications, { foreignKey: "bookingId", as: 'notification', onDelete: "CASCADE" });
     };
     return Booking;
 };
