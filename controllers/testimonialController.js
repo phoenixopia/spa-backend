@@ -1,5 +1,7 @@
 const { sequelize, Testimonials } = require("../models"); // Sequelize instance
 const streamifier = require('streamifier');
+const cloudinary= require('../utils/cloudinary');
+
 
 // Get all testimonials with pagination
 exports.getAllTestimonials = async (req, res) => {
@@ -80,8 +82,7 @@ exports.getUserTestimonials = async (req, res) => {
 // Create a new testimonial post with optional image upload
 exports.createTestimonial = async (req, res) => {
     const { firstName, lastName, title, message, status, image } = req.body;
-    const userId = req.user?.id || req.body.id;
-  
+    const userId = req.user?.id || req.params?.id;
     let imageBuffer = null;
   
     // Handle multipart file
@@ -113,7 +114,7 @@ exports.createTestimonial = async (req, res) => {
     }
   
     // Basic validation
-    if (!firstName || !lastName || !title || !message || !userId) {
+    if (!firstName || !lastName || !message || !userId) {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
   
@@ -122,7 +123,7 @@ exports.createTestimonial = async (req, res) => {
     try {
       // Check for existing testimonial
       const existingTestimonial = await Testimonials.findOne({
-        where: { title, message, userId },
+        where: { firstName, lastName, message, userId },
         transaction,
       });
   
@@ -136,7 +137,10 @@ exports.createTestimonial = async (req, res) => {
   
       // Upload image if it exists
       let imageURL = null;
-      if (imageBuffer) {
+
+      if(image?.startsWith('https')){
+        imageURL = image
+      } else if (imageBuffer) {
         const streamUpload = () => {
           return new Promise((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(
@@ -160,13 +164,10 @@ exports.createTestimonial = async (req, res) => {
   
       const publishedAt = status === "published" ? new Date() : null;
   
+      console.log("\n\n\nuserId:", userId)
       const testimonial = await Testimonials.create(
         {
-          firstName,
-          lastName,
-          title,
-          message,
-          status,
+          ...req.body,
           userId,
           publishedAt,
           imageURL,
@@ -192,89 +193,42 @@ exports.createTestimonial = async (req, res) => {
       });
     }
 };  
-  
 
-
-// // Create a new testimonial post with transaction support
-// exports.createTestimonial = async (req, res) => {
-//     const { firstName, lastName, title, message, status } = req.body;
-//     const image = req.file;
-//     const userId = req.user?.id || req.body.id;
-
-//     if (!firstName || !lastName || !title || !message || !userId || !image) {
-//         return res.status(400).json({ success: false, message: "Missing the required fields." });
-//     }
-
-//     const transaction = await sequelize.transaction();
-//     try {
-//         const existingTestimonial = await Testimonials.findOne({
-//             where: { title, message, userId },
-//             transaction,
-//         });
-
-//         if (existingTestimonial) {
-//             await transaction.rollback();
-//             return res.status(409).json({
-//                 success: false,
-//                 message: "A testimonial with this title and content already exists for this author",
-//             });
-//         }
-
-//         const streamUpload = () => {
-//             return new Promise((resolve, reject) => {
-//                 const stream = cloudinary.uploader.upload_stream(
-//                     {
-//                         folder: "Spa Testimonials",
-//                         width: 1200,
-//                         crop: "scale",
-//                     },
-//                     (error, result) => {
-//                         if (result) resolve(result);
-//                         else reject(error);
-//                     }
-//                 );
-//                 streamifier.createReadStream(image.buffer).pipe(stream);
-//             });
-//         };
-
-//         const result = await streamUpload();
-//         const publishedAt = (status === "published") ? new Date() : null;
-
-//         const data = {
-//             ...req.body,
-//             userId,
-//             publishedAt,
-//             imageURL: result.secure_url || null,
-//         };
-
-//         const testimonial = await Testimonials.create(data, { transaction });
-//         await transaction.commit();
-
-//         return res.status(201).json({
-//             success: true,
-//             message: "Testimonial created successfully",
-//             data: testimonial,
-//         });
-
-//     } catch (error) {
-//         await transaction.rollback();
-//         console.error(error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Failed to create testimonial",
-//             error: error.message,
-//         });
-//     }
-// };
 
 
 // Update a testimonial post with transaction and row locking
 exports.updateTestimonial = async (req, res) => {
-    const { ...updates } = req.body;
+  const { image, ...updates } = req.body;
     const id = req.params.id;
     if (!id) {
         return res.status(400).json({ success:false, message: 'Please provide a testimonial id.' });
     }
+
+    let imageBuffer = null;
+  
+    // Handle multipart file
+    if (req.file && req.file.buffer) {
+      imageBuffer = req.file.buffer;
+  
+    // Handle base64 image
+    } else if (image && image.startsWith("data:image")) {
+      try{
+        const base64Data = image.split(";base64,").pop();
+        imageBuffer = Buffer.from(base64Data, "base64");
+      }catch(err){
+        return res.status(400).json({ success: false, message: "Invalid image format." });
+      }
+    // Handle <Buffer ...>
+    } else if (image && image.startsWith("<Buffer")) {
+        const hex = image
+          .replace("<Buffer ", "")
+          .replace(">", "")
+          .trim()
+          .split(" ")
+          .map((byte) => parseInt(byte, 16));
+        imageBuffer = Buffer.from(hex);
+    }
+
     const t = await sequelize.transaction();
     try {
         const testimonial = await Testimonials.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE});
@@ -282,7 +236,36 @@ exports.updateTestimonial = async (req, res) => {
             await t.rollback();
             return res.status(404).json({ success: false, message: 'Testimonial not found.' });
         }
-        const [updatedCount, [updatedTestimonial]] = await Testimonials.update(updates, { where: { id }, returning: true, transaction: t,});
+        // Upload image if it exists
+        let imageURL = null;
+
+        if(image?.startsWith('https')){
+          imageURL = image
+        } else if (imageBuffer) {
+          const streamUpload = () => {
+            return new Promise((resolve, reject) => {
+              const stream = cloudinary.uploader.upload_stream(
+                {
+                  folder: "Spa Testimonials",
+                  width: 1200,
+                  crop: "scale",
+                },
+                (error, result) => {
+                  if (result) resolve(result);
+                  else reject(error);
+                }
+              );
+              streamifier.createReadStream(imageBuffer).pipe(stream);
+            });
+          };
+    
+          const result = await streamUpload();
+          imageURL = result.secure_url || null;
+        }
+
+        const data = {...updates, imageURL}
+
+        const [updatedCount, [updatedTestimonial]] = await Testimonials.update(data, { where: { id }, returning: true, transaction: t,});
         if (updatedCount === 0) {
             await t.rollback();
             return res.status(304).json({ success: false, message: 'Testimonial has no update!' });

@@ -1,12 +1,12 @@
 const { sequelize,Categories } = require('../models/index');
 const { Op } = require('sequelize');
 const streamifier = require('streamifier');
+const cloudinary= require('../utils/cloudinary');
 
 
 // create new
 exports.createCategory = async (req, res) => {
     const { name, image } = req.body;
-    const userId = req.user?.id || req.body.id;
   
     let imageBuffer = null;
   
@@ -39,7 +39,7 @@ exports.createCategory = async (req, res) => {
     }
   
     // Validate required fields
-    if (!userId || !name) {
+    if (!name) {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
   
@@ -47,7 +47,7 @@ exports.createCategory = async (req, res) => {
   
     try {
       // Prevent duplicate category by the same user
-      const existingCategory = await Categories.findOne({ where: { name, userId }, transaction });
+      const existingCategory = await Categories.findOne({ where: { name }, transaction });
       if (existingCategory) {
         await transaction.rollback();
         return res.status(409).json({ success: false, message: "A category with this name already exists for this user." });
@@ -56,7 +56,9 @@ exports.createCategory = async (req, res) => {
       let imageURL = null;
   
       // Upload to Cloudinary if image exists
-      if (imageBuffer) {
+      if(image?.startsWith('https')){
+        imageURL = image
+      } else if (imageBuffer) {
         const streamUpload = () => {
           return new Promise((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(
@@ -86,7 +88,6 @@ exports.createCategory = async (req, res) => {
       const category = await Categories.create(
         {
          ...req.body,
-          userId,
           imageURL,
         },
         { transaction }
@@ -139,11 +140,41 @@ exports.getCategoryById = async (req, res) => {
 
 // Update
 exports.updateCategory = async (req, res) => {
-    const { ...updates } = req.body;
+    const { image, ...updates } = req.body;
     const id = req.params.id;
     if (!id) {
         return res.status(400).json({ message: 'Please provide a categoryId.' });
     }
+    let imageBuffer = null;
+  
+    // 1. Handle uploaded file (e.g., from multipart/form-data)
+    if (req.file && req.file.buffer) {
+      imageBuffer = req.file.buffer;
+  
+    // 2. Handle base64 image string (e.g., from JSON body)
+    } else if (image && image.startsWith('data:image')) {
+      try {
+        const base64Data = image.split(';base64,').pop();
+        imageBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid base64 image format." });
+      }
+  
+    // 3. Handle stringified Buffer like "<Buffer ...>"
+    } else if (image && image.startsWith('<Buffer')) {
+      try {
+        const hex = image
+          .replace('<Buffer ', '')
+          .replace('>', '')
+          .trim()
+          .split(' ')
+          .map((byte) => parseInt(byte, 16));
+        imageBuffer = Buffer.from(hex);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid buffer image format." });
+      }
+    }
+
     const t = await sequelize.transaction();
     try {
       const category = await Categories.findByPk(id , { transaction: t, lock: t.LOCK.UPDATE });
@@ -151,7 +182,39 @@ exports.updateCategory = async (req, res) => {
         await t.rollback();
         return res.status(404).json({ success: false, message: 'Category not found.' });
       }
-      const [updatedCount, [updatedCategory]] = await Categories.update(updates, { where: { id }, returning: true, transaction: t,});
+      let imageURL = category.imageURL;
+  
+      // Upload to Cloudinary if image exists
+      if(image?.startsWith('https')){
+        imageURL = image
+      } else if (imageBuffer) {
+        const streamUpload = () => {
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: "Spa Categories",
+                width: 800,
+                crop: "scale",
+                resource_type: "image",
+              },
+              (error, result) => {
+                if (result) {
+                  resolve(result);
+                } else {
+                  reject(error);
+                }
+              }
+            );
+            streamifier.createReadStream(imageBuffer).pipe(stream);
+          });
+        };
+  
+        const result = await streamUpload();
+        imageURL = result.secure_url;
+      }
+      const data = {...updates, imageURL}
+
+      const [updatedCount, [updatedCategory]] = await Categories.update(data, { where: { id }, returning: true, transaction: t,});
       if (updatedCount === 0) {
         await t.rollback();
         return res.status(304).json({ success: false, message: `A category with id '${id}' has no update!` });

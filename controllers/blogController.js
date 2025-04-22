@@ -1,3 +1,4 @@
+const { Op } = require("sequelize");
 const { sequelize, Blogs } = require("../models"); // Sequelize instance
 const cloudinary= require('../utils/cloudinary');
 const streamifier = require('streamifier');
@@ -12,6 +13,7 @@ exports.getAllBlogs = async (req, res) => {
         const totalPages = Math.ceil(blogCount / pageSize);
 
         const blogs = await Blogs.findAll({
+            where: { status: {[Op.ne]: 'Archived'}},
             offset: (pageNumber - 1) * pageSize,
             limit: pageSize,
             order: [['updatedAt', 'DESC']],
@@ -61,7 +63,7 @@ exports.getBlogsForUser = async (req, res) => {
         const totalPages = Math.ceil(blogCount / pageSize);
 
         const blogs = await Blogs.findAll({
-            where: { userId },
+            where: { userId, status: {[Op.ne]: 'Archived'} },
             offset: (pageNumber - 1) * pageSize,
             limit: pageSize,
             order: [['updatedAt', 'DESC']],
@@ -85,11 +87,8 @@ exports.createBlog = async (req, res) => {
   
     let imageBuffer = null;
   
-    // 1. Handle uploaded file (e.g., from multipart/form-data)
     if (req.file && req.file.buffer) {
       imageBuffer = req.file.buffer;
-  
-    // 2. Handle base64 image string (e.g., from JSON body)
     } else if (image && image.startsWith('data:image')) {
       try {
         const base64Data = image.split(';base64,').pop();
@@ -122,7 +121,11 @@ exports.createBlog = async (req, res) => {
   
     try {
       // Prevent duplicate blog by the same user
-      const existingBlog = await Blogs.findOne({ where: { title, content, userId }, transaction });
+      const existingBlog = await Blogs.findOne({ 
+        where: { title, content, userId, status: {[Op.ne]: 'Archived'},}, 
+        transaction 
+      });
+
       if (existingBlog) {
         await transaction.rollback();
         return res.status(409).json({ success: false, message: "A blog with this title and content already exists for this author." });
@@ -130,8 +133,10 @@ exports.createBlog = async (req, res) => {
   
       let imageURL = null;
   
-      // Upload to Cloudinary if image exists
-      if (imageBuffer) {
+      if(image?.startsWith('https')){
+        imageURL = image
+      }
+      else if (imageBuffer) {
         const streamUpload = () => {
           return new Promise((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(
@@ -181,34 +186,108 @@ exports.createBlog = async (req, res) => {
     }
 };  
 
-  
 
-// Update a blog post with transaction and row locking
 exports.updateBlog = async (req, res) => {
-    const { ...updates } = req.body;
-    const id = req.params.id;
-    if (!id) {
-        return res.status(400).json({ success:false, message: 'Please provide a blog id.' });
-    }
-    const t = await sequelize.transaction();
-    try {
-        const blog = await Blogs.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE});
-        if (!blog) {
-            await t.rollback();
-            return res.status(404).json({ success: false, message: 'Blog not found.' });
-        }
-        const [updatedCount, [updatedBlog]] = await Blogs.update(updates, { where: { id }, returning: true, transaction: t,});
-        if (updatedCount === 0) {
-            await t.rollback();
-            return res.status(304).json({ success: false, message: 'Blog has no update!' });
-        }
-        await t.commit();
-        return res.status(200).json({ success: true, message: 'Updated successfully.', data: updatedBlog,});
-    } catch (error) {
-        await t.rollback();
-        console.error(error);
-        return res.status(500).json({ success: false, message: 'Failed to update a blog.', error: error.message });
-    }
+  const id = req.params.id;
+  const { image, ...updates } = req.body;
+
+  if (!id) {
+      return res.status(400).json({ success: false, message: 'Please provide a blog id.' });
+  }
+
+  let imageBuffer = null;
+
+  // Check if image was provided either via file upload or body
+  if (req.file?.buffer) {
+      imageBuffer = req.file.buffer;
+  } else if (image?.startsWith('data:image')) {
+      try {
+          const base64Data = image.split(';base64,').pop();
+          imageBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+          return res.status(400).json({ success: false, message: "Invalid base64 image format." });
+      }
+  } else if (image?.startsWith('<Buffer')) {
+      try {
+          const hex = image
+              .replace('<Buffer ', '')
+              .replace('>', '')
+              .trim()
+              .split(' ')
+              .map((byte) => parseInt(byte, 16));
+          imageBuffer = Buffer.from(hex);
+      } catch (e) {
+          return res.status(400).json({ success: false, message: "Invalid buffer image format." });
+      }
+  }
+
+  const t = await sequelize.transaction();
+  try {
+      const blog = await Blogs.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!blog) {
+          await t.rollback();
+          return res.status(404).json({ success: false, message: 'Blog not found.' });
+      }
+
+      let imageURL = blog.imageURL;
+  
+      // Upload to Cloudinary if image exists
+      if(image?.startsWith('https')){
+        imageURL = image
+      } else if (imageBuffer) {
+        const streamUpload = () => {
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: "Spa Blogs",
+                width: 1200,
+                crop: "scale",
+                resource_type: "image",
+              },
+              (error, result) => {
+                if (result) {
+                  resolve(result);
+                } else {
+                  reject(error);
+                }
+              }
+            );
+            streamifier.createReadStream(imageBuffer).pipe(stream);
+          });
+        };
+  
+        const result = await streamUpload();
+        imageURL = result.secure_url;
+      }
+
+      const data = {...updates, imageURL}
+
+      const [updatedCount, [updatedBlog]] = await Blogs.update(data, {
+          where: { id },
+          returning: true,
+          transaction: t,
+      });
+
+      if (updatedCount === 0) {
+          await t.rollback();
+          return res.status(304).json({ success: false, message: 'Blog has no update!' });
+      }
+
+      await t.commit();
+      return res.status(200).json({
+          success: true,
+          message: 'Updated successfully.',
+          data: updatedBlog,
+      });
+  } catch (error) {
+      await t.rollback();
+      console.error(error);
+      return res.status(500).json({
+          success: false,
+          message: 'Failed to update the blog.',
+          error: error.message,
+      });
+  }
 };
       
 

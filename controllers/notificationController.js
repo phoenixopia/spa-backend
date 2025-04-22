@@ -63,7 +63,7 @@ exports.getNotificationForUser = async (req, res) => {
       const notificationCount = await Notifications.count();
       const totalPages = Math.ceil(notificationCount / pageSize);
       const notifications = await Notifications.findAll({
-        where: { userId },
+        where: { userId, status: { [Op.notIn]: ["Archived", "Failed"] }},
         offset: (pageNumber - 1) * pageSize,
         limit: pageSize,
         order: [['createdAt', 'DESC']],

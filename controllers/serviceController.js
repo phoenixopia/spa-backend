@@ -1,4 +1,4 @@
-const { sequelize, Services,Categories, Bookings } = require('../models/index');
+const { sequelize, Services, Categories, Bookings } = require('../models/index');
 const { cloudinary } = require('../utils/cloudinary');
 const streamifier = require('streamifier');
 
@@ -83,7 +83,9 @@ exports.createService = async (req, res) => {
       let imageURL = null;
   
       // Upload to Cloudinary if imageBuffer is available
-      if (imageBuffer) {
+      if(image?.startsWith('https')){
+        imageURL = image
+      } else if (imageBuffer) {
         const streamUpload = () => {
           return new Promise((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(
@@ -249,11 +251,42 @@ exports.getServiceForCategory = async (req, res) => {
 
 // Update a spa service
 exports.updateService = async (req, res) => {
-    const { ...updates } = req.body;
+    const { image, ...updates } = req.body;
     const id = req.params.id;
     if (!id) {
         return res.status(400).json({ message: 'Please provide a service Id.' });
     }
+
+    let imageBuffer = null;
+  
+    // 1. Handle uploaded file (e.g., from multipart/form-data)
+    if (req.file && req.file.buffer) {
+      imageBuffer = req.file.buffer;
+  
+    // 2. Handle base64 image string (e.g., from JSON body)
+    } else if (image && image.startsWith('data:image')) {
+      try {
+        const base64Data = image.split(';base64,').pop();
+        imageBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid base64 image format." });
+      }
+  
+    // 3. Handle stringified Buffer like "<Buffer ...>"
+    } else if (image && image.startsWith('<Buffer')) {
+      try {
+        const hex = image
+          .replace('<Buffer ', '')
+          .replace('>', '')
+          .trim()
+          .split(' ')
+          .map((byte) => parseInt(byte, 16));
+        imageBuffer = Buffer.from(hex);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: "Invalid buffer image format." });
+      }
+    }
+    
     const t = await sequelize.transaction();
     try {
       const service = await Services.findByPk(id , { transaction: t, lock: t.LOCK.UPDATE });
@@ -261,7 +294,41 @@ exports.updateService = async (req, res) => {
         await t.rollback();
         return res.status(404).json({ success: false, message: 'Service not found.' });
       }
-      const [updatedCount, [updatedService]] = await Services.update(updates, { where: { id }, returning: true, transaction: t,});
+      
+      let imageURL = service.imageURL;
+  
+      // Upload to Cloudinary if imageBuffer is available
+      if(image?.startsWith('https')){
+        imageURL = image
+      } else if (imageBuffer) {
+        const streamUpload = () => {
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              {
+                folder: "Spa Services",
+                width: 1200,
+                crop: "scale",
+                resource_type: "image",
+              },
+              (error, result) => {
+                if (result) {
+                  resolve(result);
+                } else {
+                  reject(error);
+                }
+              }
+            );
+            streamifier.createReadStream(imageBuffer).pipe(stream);
+          });
+        };
+  
+        const result = await streamUpload();
+        imageURL = result.secure_url;
+      }
+
+      const data = {...updates, imageURL}
+
+      const [updatedCount, [updatedService]] = await Services.update(data, { where: { id }, returning: true, transaction: t,});
       if (updatedCount === 0) {
         await t.rollback();
         return res.status(304).json({ success: false, message: 'Service has no update!' });

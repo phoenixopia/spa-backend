@@ -9,7 +9,7 @@ const capitalizeName = (name) => {
 
 // create a new user
 exports.createUser = async (req, res) => {
-    const { firstName, lastName, email, password } = req.body;
+    const { firstName, lastName, email, password, phoneNumber } = req.body;
     const t = await sequelize.transaction();
     try {
         if (!firstName || !lastName || !email || !password) {
@@ -26,7 +26,7 @@ exports.createUser = async (req, res) => {
         const formattedFirstName = capitalizeName(firstName);
         const formattedLastName = capitalizeName(lastName);
         const newUser = await Users.create(
-            { firstName: formattedFirstName, lastName: formattedLastName, email, password, isConfirmed: true},  { transaction: t }
+            { firstName: formattedFirstName, lastName: formattedLastName, email, password, phoneNumber, isConfirmed: true},  { transaction: t }
         );
         await t.commit();
         return res.status(201).json({ success: true, message: 'User created successfully.', data: newUser });
@@ -66,7 +66,7 @@ exports.getAll = async (req, res, next) => {
     const userCount = await Users.count();
     const totalPages = Math.ceil(userCount / pageSize);
     const users = await Users.findAll({
-      // where: {role: 'admin'},
+      where: { role: {[Op.ne]: 'super-admin'}},
       include: [
         { model: Notifications, as: 'notification'},
       ],
@@ -93,9 +93,6 @@ exports.update = async (req, res, next) => {
   if (!id) {
       return res.status(400).json({ message: 'Please provide a user Id.' });
   }
-  if (req.user?.role === 'super-admin') {
-    return res.status(400).json({ success: false, message: 'Can not edit the user with "admin" role.' });
-  }
   const t = await sequelize.transaction();
   try {
     const user = await Users.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE});
@@ -103,6 +100,11 @@ exports.update = async (req, res, next) => {
       await t.rollback();
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
+    if (user.role === 'super-admin') {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'Can not delete the super admin user.' });
+    }
+
     const [updatedCount, [updatedUser]] = await Users.update(updates, { where: { id }, returning: true, transaction: t,});
     if (updatedCount === 0) {
       await t.rollback();
@@ -126,15 +128,18 @@ exports.deleteUser = async (req, res) => {
     if (!id) {
         return res.status(400).json({ success: false, message: 'Please provide a user Id.' });
     }
-    if (req?.user?.role === 'super-admin') {
-      return res.status(400).json({ success: false, message: 'Can not deleted the user with "admin" role.' });
-    }
     const user = await Users.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!user) {
       await t.rollback();
       return res.status(404).json({ success: false, message: 'User not found or was deleted before.' });
     }
+    if (user.role === 'super-admin') {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'Can not delete the super admin user.' });
+    }
+
     await user.destroy({ transaction: t });
+
     if (req.user?.id && id === req.user.id) {
       res.clearCookie('token');
     }

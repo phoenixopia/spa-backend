@@ -70,7 +70,7 @@ module.exports = (sequelize, DataTypes) => {
         }
     );
     SpaService.associate = (models) => {
-        SpaService.hasMany(models.Bookings, { foreignKey: 'serviceId', as: 'booking' });
+        SpaService.hasMany(models.Bookings, { foreignKey: 'serviceId', as: 'booking', onDelete: 'CASCADE', hooks: true });
         SpaService.belongsTo(models.Categories, { foreignKey: 'categoryId', as: 'category' });
     };
     
